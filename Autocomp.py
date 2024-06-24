@@ -1,6 +1,7 @@
-import streamlit as st
+ import streamlit as st
 from sentence_transformers import SentenceTransformer, util
 import torch
+import time
 
 # Load a pre-trained Sentence Transformer model
 @st.cache_resource
@@ -33,39 +34,41 @@ def get_column_suggestions(user_input, top_k=5):
     top_results = torch.topk(cos_scores, k=top_k)
     return [list(schema.keys())[i] for i in top_results.indices]
 
-st.title("SQL Query Builder with Auto-Completion")
+st.title("Real-time SQL Query Auto-Completion")
 
-# Initialize session state for the query input
-if 'query_input' not in st.session_state:
-    st.session_state.query_input = ""
+# Initialize session state
+if 'query' not in st.session_state:
+    st.session_state.query = ""
+if 'suggestions' not in st.session_state:
+    st.session_state.suggestions = []
 
-# Function to update query input
-def update_query_input():
-    if st.session_state.suggestion != "":
-        current_position = len(st.session_state.query_input)
-        st.session_state.query_input = (
-            st.session_state.query_input[:current_position] + 
-            st.session_state.suggestion + " " + 
-            st.session_state.query_input[current_position:]
-        )
-    st.session_state.suggestion = ""
+# Create a text input for the query
+query_input = st.empty()
 
-# Text input for the query
-query_input = st.text_input("Start typing your SQL query:", 
-                            key="query_input", 
-                            value=st.session_state.query_input)
+# Create a space for suggestions
+suggestion_space = st.empty()
 
-# Get suggestions based on the current input
-if query_input:
-    suggestions = get_column_suggestions(query_input)
+while True:
+    # Update the query input
+    current_query = query_input.text_input("Type your SQL query:", value=st.session_state.query)
     
-    # Dropdown for suggestions
-    st.selectbox("Suggested columns:", 
-                 [""] + suggestions, 
-                 key="suggestion", 
-                 on_change=update_query_input)
+    # If the query has changed, update suggestions
+    if current_query != st.session_state.query:
+        st.session_state.query = current_query
+        if current_query:
+            st.session_state.suggestions = get_column_suggestions(current_query)
+        else:
+            st.session_state.suggestions = []
+    
+    # Display suggestions
+    if st.session_state.suggestions:
+        suggestion_text = "Suggestions: " + ", ".join(st.session_state.suggestions)
+        suggestion_space.text(suggestion_text)
+    else:
+        suggestion_space.empty()
+    
+    # Short sleep to prevent excessive updating
+    time.sleep(0.1)
 
-if st.button("Generate SQL Query"):
-    # Here you would typically process the query, perhaps generating SQL
-    # For demonstration, we'll just display the input
-    st.write("Generated SQL Query:", st.session_state.query_input)
+    # Rerun the app
+    st.experimental_rerun()

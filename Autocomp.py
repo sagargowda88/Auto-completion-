@@ -1,74 +1,56 @@
- import streamlit as st
-from sentence_transformers import SentenceTransformer, util
-import torch
-import time
+import streamlit as st
 
-# Load a pre-trained Sentence Transformer model
-@st.cache_resource
-def load_model():
-    return SentenceTransformer('all-MiniLM-L6-v2')
+# Schema with column names
+schema = [
+    'user_id', 'username', 'email', 'age', 'location', 'signup_date',
+    'last_login', 'account_status', 'profile_picture', 'bio',
+    'friends_count', 'posts_count', 'likes_received', 'comments_made',
+    'total_time_spent', 'preferred_language', 'notification_settings'
+]
 
-model = load_model()
-
-# Schema with column names and descriptions
-schema = {
-    'user_id': 'Unique identifier for each user',
-    'username': 'Name chosen by the user for their account',
-    'email': 'Email address of the user',
-    'age': 'Age of the user in years',
-    'location': 'Geographic location of the user',
-    'signup_date': 'Date when the user created their account'
-}
-
-# Precompute embeddings for schema items
-@st.cache_data
-def get_column_embeddings():
-    return model.encode(list(schema.values()), convert_to_tensor=True)
-
-column_embeddings = get_column_embeddings()
-
-@st.cache_data
-def get_column_suggestions(user_input, top_k=5):
-    input_embedding = model.encode(user_input, convert_to_tensor=True)
-    cos_scores = util.cos_sim(input_embedding, column_embeddings)[0]
-    top_results = torch.topk(cos_scores, k=top_k)
-    return [list(schema.keys())[i] for i in top_results.indices]
+def get_suggestions(prefix):
+    return [col for col in schema if col.startswith(prefix.lower())]
 
 st.title("Real-time SQL Query Auto-Completion")
 
-# Initialize session state
+# Initialize session state for query and cursor position
 if 'query' not in st.session_state:
     st.session_state.query = ""
-if 'suggestions' not in st.session_state:
-    st.session_state.suggestions = []
+if 'cursor_pos' not in st.session_state:
+    st.session_state.cursor_pos = 0
+
+def on_change():
+    # Get the current word being typed
+    current_word = st.session_state.query[:st.session_state.cursor_pos].split()[-1] if st.session_state.query else ""
+    
+    # Get suggestions for the current word
+    suggestions = get_suggestions(current_word)
+    
+    # Update suggestions in session state
+    st.session_state.suggestions = suggestions
 
 # Create a text input for the query
-query_input = st.empty()
+query = st.text_input("Type your SQL query:", 
+                      value=st.session_state.query, 
+                      key="query_input",
+                      on_change=on_change)
 
-# Create a space for suggestions
-suggestion_space = st.empty()
+# Update cursor position
+st.session_state.cursor_pos = len(query)
 
-while True:
-    # Update the query input
-    current_query = query_input.text_input("Type your SQL query:", value=st.session_state.query)
-    
-    # If the query has changed, update suggestions
-    if current_query != st.session_state.query:
-        st.session_state.query = current_query
-        if current_query:
-            st.session_state.suggestions = get_column_suggestions(current_query)
+# Display suggestions
+if 'suggestions' in st.session_state and st.session_state.suggestions:
+    selected_suggestion = st.selectbox("Suggestions:", st.session_state.suggestions)
+    if st.button("Use Suggestion"):
+        # Replace the current word with the selected suggestion
+        words = st.session_state.query.split()
+        if words:
+            words[-1] = selected_suggestion
         else:
-            st.session_state.suggestions = []
-    
-    # Display suggestions
-    if st.session_state.suggestions:
-        suggestion_text = "Suggestions: " + ", ".join(st.session_state.suggestions)
-        suggestion_space.text(suggestion_text)
-    else:
-        suggestion_space.empty()
-    
-    # Short sleep to prevent excessive updating
-    time.sleep(0.1)
+            words = [selected_suggestion]
+        st.session_state.query = " ".join(words) + " "
+        st.experimental_rerun()
 
-    # Rerun the app
-    st.experimental_rerun()
+# Display the current query
+st.text("Current Query:")
+st.code(st.session_state.query)

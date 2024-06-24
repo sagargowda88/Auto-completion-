@@ -3,7 +3,11 @@ from sentence_transformers import SentenceTransformer, util
 import torch
 
 # Load a pre-trained Sentence Transformer model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+@st.cache_resource
+def load_model():
+    return SentenceTransformer('all-MiniLM-L6-v2')
+
+model = load_model()
 
 # Schema with column names and descriptions
 schema = {
@@ -16,7 +20,11 @@ schema = {
 }
 
 # Precompute embeddings for schema items
-column_embeddings = model.encode(list(schema.values()), convert_to_tensor=True)
+@st.cache_data
+def get_column_embeddings():
+    return model.encode(list(schema.values()), convert_to_tensor=True)
+
+column_embeddings = get_column_embeddings()
 
 @st.cache_data
 def get_column_suggestions(user_input, top_k=5):
@@ -27,56 +35,37 @@ def get_column_suggestions(user_input, top_k=5):
 
 st.title("SQL Query Builder with Auto-Completion")
 
-# Use a container to hold the input and suggestions
-input_container = st.container()
+# Initialize session state for the query input
+if 'query_input' not in st.session_state:
+    st.session_state.query_input = ""
 
-with input_container:
-    user_input = st.text_input("Start typing your SQL query:", key="user_input")
+# Function to update query input
+def update_query_input():
+    if st.session_state.suggestion != "":
+        current_position = len(st.session_state.query_input)
+        st.session_state.query_input = (
+            st.session_state.query_input[:current_position] + 
+            st.session_state.suggestion + " " + 
+            st.session_state.query_input[current_position:]
+        )
+    st.session_state.suggestion = ""
+
+# Text input for the query
+query_input = st.text_input("Start typing your SQL query:", 
+                            key="query_input", 
+                            value=st.session_state.query_input)
+
+# Get suggestions based on the current input
+if query_input:
+    suggestions = get_column_suggestions(query_input)
     
-    if user_input:
-        suggestions = get_column_suggestions(user_input)
-        selected_suggestion = st.selectbox("Suggested columns:", [""] + suggestions, key="suggestion_box")
-        
-        if selected_suggestion:
-            # Insert the selected suggestion at the cursor position
-            cursor_pos = len(user_input)
-            new_input = user_input[:cursor_pos] + selected_suggestion + " " + user_input[cursor_pos:]
-            st.session_state.user_input = new_input
-
-# JavaScript for better auto-completion experience
-st.markdown("""
-<script>
-const inputElement = window.parent.document.querySelector('input[aria-label="Start typing your SQL query:"]');
-const selectElement = window.parent.document.querySelector('select[aria-label="Suggested columns:"]');
-
-inputElement.addEventListener('input', function() {
-    // Trigger Streamlit rerun on input
-    setTimeout(() => {
-        const selectBox = window.parent.document.querySelector('select[aria-label="Suggested columns:"]');
-        if (selectBox) {
-            selectBox.size = 5;  // Show 5 options at a time
-            selectBox.style.position = 'absolute';
-            selectBox.style.zIndex = 1000;
-        }
-    }, 100);
-});
-
-selectElement.addEventListener('change', function() {
-    // Insert selected value and reset select
-    const selectedValue = this.value;
-    if (selectedValue) {
-        const cursorPosition = inputElement.selectionStart;
-        inputElement.value = inputElement.value.slice(0, cursorPosition) + selectedValue + ' ' + inputElement.value.slice(cursorPosition);
-        inputElement.focus();
-        inputElement.setSelectionRange(cursorPosition + selectedValue.length + 1, cursorPosition + selectedValue.length + 1);
-        this.value = '';
-    }
-});
-
-</script>
-""", unsafe_allow_html=True)
+    # Dropdown for suggestions
+    st.selectbox("Suggested columns:", 
+                 [""] + suggestions, 
+                 key="suggestion", 
+                 on_change=update_query_input)
 
 if st.button("Generate SQL Query"):
     # Here you would typically process the query, perhaps generating SQL
     # For demonstration, we'll just display the input
-    st.write("Generated SQL Query:", user_input)
+    st.write("Generated SQL Query:", st.session_state.query_input)
